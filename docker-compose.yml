@@ -1,0 +1,6 @@
+services:
+  partnerintegration.bff.api:
+    image: ${DOCKER_REGISTRY-}partnerintegrationbffapi
+    build:
+      context: .
+      dockerfile: PartnerIntegration.BFF.Api/Dockerfile

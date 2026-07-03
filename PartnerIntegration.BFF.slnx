@@ -1,4 +1,7 @@
 <Solution>
+  <Project Path="docker-compose.dcproj">
+    <Build />
+  </Project>
   <Project Path="PartnerIntegration.BFF.Api/PartnerIntegration.BFF.Api.csproj" />
   <Project Path="PartnerIntegration.BFF.Core/PartnerIntegration.BFF.Core.csproj" />
   <Project Path="PartnerIntegration.BFF.Infrastructure/PartnerIntegration.BFF.Infrastructure.csproj" />
