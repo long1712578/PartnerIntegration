@@ -1,8 +1,7 @@
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
-using MassTransit;
 using PartnerIntegration.BFF.Core.Interfaces;
-using PartnerIntegration.BFF.Infrastructure.Clients;
+using PartnerIntegration.BFF.Infrastructure.HttpClients;
 using PartnerIntegration.BFF.Infrastructure.Publishers;
 using Polly;
 using Microsoft.Extensions.Http.Resilience;
@@ -17,9 +16,11 @@ public static class InfrastructureServiceCollectionExtensions
         services.AddHttpClient<IPartnerVerificationClient, PartnerVerificationClient>()
             .ConfigureHttpClient(client =>
             {
-                var baseAddress = configuration["PartnerApi:BaseAddress"] ?? string.Empty;
+                var baseAddress = configuration["PartnerApi:BaseAddress"]
+                    ?? throw new InvalidOperationException("PartnerApi:BaseAddress is not configured.");
                 client.BaseAddress = new Uri(baseAddress);
-                client.Timeout = TimeSpan.FromSeconds(int.Parse(configuration["PartnerApi:TimeoutSeconds"] ?? "30"));
+                if (int.TryParse(configuration["PartnerApi:TimeoutSeconds"], out var timeout))
+                    client.Timeout = TimeSpan.FromSeconds(timeout);
             })
             .AddResilienceHandler("PartnerApiResilience", builder =>
             {
@@ -32,23 +33,19 @@ public static class InfrastructureServiceCollectionExtensions
                 builder.AddTimeout(TimeSpan.FromSeconds(10));
             });
 
-        // Add MassTransit for RabbitMQ
-        //services.AddMassTransit(x =>
-        //{
-        //    x.AddConsumers(typeof(InfrastructureServiceCollectionExtensions).Assembly);
+        //Add MassTransit for RabbitMQ
+        var rabbitmqUri = configuration["RabbitMQ:Uri"]
+            ?? throw new InvalidOperationException("RabbitMQ:Uri is not configured.");
+        var queueName = configuration["RabbitMQ:QueueName"]
+            ?? throw new InvalidOperationException("RabbitMQ:QueueName is not configured.");
 
-        //    x.UsingRabbitMq((context, cfg) =>
-        //    {
-        //        var rabbitmqUri = configuration["RabbitMQ:Uri"] ?? string.Empty;
-
-        //        cfg.Host(new Uri(rabbitmqUri));
-
-        //        cfg.ConfigureEndpoints(context);
-        //    });
-        //});
+        if (!Uri.TryCreate(rabbitmqUri, UriKind.Absolute, out var validatedUri))
+            throw new InvalidOperationException($"RabbitMQ:Uri '{rabbitmqUri}' is not a valid URI.");
+        if (string.IsNullOrWhiteSpace(queueName))
+            throw new InvalidOperationException("RabbitMQ:QueueName cannot be empty.");
 
         // Register TransactionMessagePublisher
-        //services.AddScoped<ITransactionMessagePublisher, TransactionMessagePublisher>();
+        services.AddScoped<ITransactionMessagePublisher, TransactionMessagePublisher>();
 
         return services;
     }

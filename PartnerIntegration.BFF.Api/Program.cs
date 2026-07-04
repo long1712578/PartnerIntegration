@@ -1,4 +1,3 @@
-using FluentValidation;
 using Microsoft.AspNetCore.Mvc;
 using PartnerIntegration.BFF.Api.Filters;
 using PartnerIntegration.BFF.Core.Extensions;
@@ -19,14 +18,15 @@ if (app.Environment.IsDevelopment())
     app.MapOpenApi();
 }
 
-app.UseHttpsRedirection();
+if (!app.Environment.IsDevelopment())
+{
+    app.UseHttpsRedirection();
+}
 
 app.MapPost("/api/v1/partner/transactions", async ([FromBody] PartnerTransactionRequest request, [FromServices] IPartnerVerificationClient partnerClient,
                                                    [FromServices] ITransactionMessagePublisher messagePublisher, CancellationToken cancellationToken) =>
 {
-    // Validate Payload
-
-    // Verify Partner qua External API
+    // Verify Partner via External API
     var isPartnerValid = await partnerClient.VerifyPartnerAsync(request.PartnerId, cancellationToken);
 
     if (!isPartnerValid)
@@ -39,7 +39,7 @@ app.MapPost("/api/v1/partner/transactions", async ([FromBody] PartnerTransaction
 
     return Results.Accepted(value: new { Message = "Transaction accepted and queued for processing." });
 })
-.AddEndpointFilter<ValidationFilter<PartnerTransactionRequest>>(); // Gắn Validation Filter vào endpoint
+.AddEndpointFilter<ValidationFilter<PartnerTransactionRequest>>(); // Add Validation Filter into endpoint
 
 
 // Mock "Partner Verification API" internal
