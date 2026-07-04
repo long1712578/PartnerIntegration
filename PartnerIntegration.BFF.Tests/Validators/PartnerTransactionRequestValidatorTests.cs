@@ -18,8 +18,8 @@ public class PartnerTransactionRequestValidatorTests
     {
         // Arrange
         var request = new PartnerTransactionRequest(
-            PartnerId: "PARTNER123",
-            TransactionReference: "TXN001",
+            PartnerId: "P-1000",
+            TransactionReference: "TXN-99823",
             Amount: 100.50m,
             Currency: "USD",
             Timestamp: DateTimeOffset.UtcNow);
@@ -37,7 +37,7 @@ public class PartnerTransactionRequestValidatorTests
         // Arrange
         var request = new PartnerTransactionRequest(
             PartnerId: "",
-            TransactionReference: "TXN001",
+            TransactionReference: "TXN-001",
             Amount: 100.50m,
             Currency: "USD",
             Timestamp: DateTimeOffset.UtcNow);
@@ -55,8 +55,8 @@ public class PartnerTransactionRequestValidatorTests
     {
         // Arrange
         var request = new PartnerTransactionRequest(
-            PartnerId: "PARTNER123",
-            TransactionReference: "TXN001",
+            PartnerId: "P-1001",
+            TransactionReference: "TXN-001",
             Amount: 100.50m,
             Currency: "XYZ",
             Timestamp: DateTimeOffset.UtcNow);
@@ -76,8 +76,8 @@ public class PartnerTransactionRequestValidatorTests
     {
         // Arrange
         var request = new PartnerTransactionRequest(
-            PartnerId: "PARTNER123",
-            TransactionReference: "TXN001",
+            PartnerId: "P-1001",
+            TransactionReference: "TXN-001",
             Amount: amount,
             Currency: "USD",
             Timestamp: DateTimeOffset.UtcNow);
@@ -99,8 +99,8 @@ public class PartnerTransactionRequestValidatorTests
     {
         // Arrange
         var request = new PartnerTransactionRequest(
-            PartnerId: "PARTNER123",
-            TransactionReference: "TXN001",
+            PartnerId: "P-1001",
+            TransactionReference: "TXN-001",
             Amount: 100.50m,
             Currency: currency,
             Timestamp: DateTimeOffset.UtcNow);
