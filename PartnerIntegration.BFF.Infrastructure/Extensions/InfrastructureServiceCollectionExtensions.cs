@@ -4,6 +4,8 @@ using MassTransit;
 using PartnerIntegration.BFF.Core.Interfaces;
 using PartnerIntegration.BFF.Infrastructure.Clients;
 using PartnerIntegration.BFF.Infrastructure.Publishers;
+using Polly;
+using Microsoft.Extensions.Http.Resilience;
 
 namespace PartnerIntegration.BFF.Infrastructure.Extensions;
 
@@ -18,6 +20,16 @@ public static class InfrastructureServiceCollectionExtensions
                 var baseAddress = configuration["PartnerApi:BaseAddress"] ?? string.Empty;
                 client.BaseAddress = new Uri(baseAddress);
                 client.Timeout = TimeSpan.FromSeconds(int.Parse(configuration["PartnerApi:TimeoutSeconds"] ?? "30"));
+            })
+            .AddResilienceHandler("PartnerApiResilience", builder =>
+            {
+                builder.AddRetry(new HttpRetryStrategyOptions
+                {
+                    MaxRetryAttempts = 3,
+                    Delay = TimeSpan.FromSeconds(2),
+                    BackoffType = DelayBackoffType.Exponential
+                });
+                builder.AddTimeout(TimeSpan.FromSeconds(10));
             });
 
         // Add MassTransit for RabbitMQ

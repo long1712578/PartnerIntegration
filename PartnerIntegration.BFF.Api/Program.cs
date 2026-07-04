@@ -1,4 +1,6 @@
 using FluentValidation;
+using Microsoft.AspNetCore.Mvc;
+using PartnerIntegration.BFF.Api.Filters;
 using PartnerIntegration.BFF.Core.Extensions;
 using PartnerIntegration.BFF.Core.Interfaces;
 using PartnerIntegration.BFF.Core.Models;
@@ -19,53 +21,40 @@ if (app.Environment.IsDevelopment())
 
 app.UseHttpsRedirection();
 
-app.MapPost("/api/transactions", async (
-    PartnerTransactionRequest request,
-    IValidator<PartnerTransactionRequest> validator,
-    IPartnerVerificationClient verificationClient,
-    ITransactionMessagePublisher messagePublisher,
-    ILogger<Program> logger,
-    CancellationToken cancellationToken) =>
+app.MapPost("/api/v1/partner/transactions", async ([FromBody] PartnerTransactionRequest request, [FromServices] IPartnerVerificationClient partnerClient,
+                                                   [FromServices] ITransactionMessagePublisher messagePublisher, CancellationToken cancellationToken) =>
 {
-    try
-    {
-        var validationResult = await validator.ValidateAsync(request, cancellationToken);
-        if (!validationResult.IsValid)
-        {
-            logger.LogWarning("Transaction validation failed for PartnerId: {PartnerId}", request.PartnerId);
-            return Results.BadRequest(new { errors = validationResult.Errors.Select(e => e.ErrorMessage) });
-        }
-        logger.LogInformation("Verifying partner: {PartnerId} for transaction: {TransactionReference}", request.PartnerId, request.TransactionReference);
-        var isPartnerValid = await verificationClient.VerifyPartnerAsync(request.PartnerId, cancellationToken);
-        
-        if (!isPartnerValid)
-        {
-            logger.LogWarning("Partner verification failed for PartnerId: {PartnerId}", request.PartnerId);
-            return Results.BadRequest(new { error = "Partner verification failed" });
-        }
+    // Validate Payload
 
-        logger.LogInformation("Publishing transaction: {TransactionReference}", request.TransactionReference);
-        await messagePublisher.PublishTransactionAsync(request, cancellationToken);
-        
-        logger.LogInformation("Transaction processed successfully: {TransactionReference}", request.TransactionReference);
-        return Results.Accepted("", new { transactionReference = request.TransactionReference });
-    }
-    catch (OperationCanceledException ex)
+    // Verify Partner qua External API
+    var isPartnerValid = await partnerClient.VerifyPartnerAsync(request.PartnerId, cancellationToken);
+
+    if (!isPartnerValid)
     {
-        logger.LogWarning(ex, "Operation cancelled for transaction: {TransactionReference}", request.TransactionReference);
-        return Results.StatusCode(StatusCodes.Status408RequestTimeout);
+        return Results.Problem(statusCode: 403, title: "Partner Verification Failed", detail: "The provided PartnerId is invalid or inactive.");
     }
-    catch (Exception ex)
-    {
-        logger.LogError(ex, "Unexpected error processing transaction: {TransactionReference}", request.TransactionReference);
-        return Results.StatusCode(StatusCodes.Status500InternalServerError);
-    }
+
+    // Push into Queue
+    await messagePublisher.PublishTransactionAsync(request, cancellationToken);
+
+    return Results.Accepted(value: new { Message = "Transaction accepted and queued for processing." });
 })
-.WithName("ProcessTransaction")
-.WithOpenApi()
-.Produces(StatusCodes.Status202Accepted)
-.Produces(StatusCodes.Status400BadRequest)
-.Produces(StatusCodes.Status408RequestTimeout)
-.Produces(StatusCodes.Status500InternalServerError);
+.AddEndpointFilter<ValidationFilter<PartnerTransactionRequest>>(); // Gắn Validation Filter vào endpoint
+
+
+// Mock "Partner Verification API" internal
+app.MapGet("/internal/mock-partner/{id}", (string id) =>
+{
+    // Random error 30% to test Retry logic
+    var randomValue = Random.Shared.Next(1, 101);
+
+    if (randomValue <= 30)
+    {
+        throw new TimeoutException("Simulated partner API timeout.");
+    }
+
+    // 70% success
+    return Results.Ok(new { PartnerId = id, Status = "Active" });
+});
 
 app.Run();
