@@ -1,12 +1,17 @@
+using FluentValidation;
+using PartnerIntegration.BFF.Core.Extensions;
+using PartnerIntegration.BFF.Core.Interfaces;
+using PartnerIntegration.BFF.Core.Models;
+using PartnerIntegration.BFF.Infrastructure.Extensions;
+
 var builder = WebApplication.CreateBuilder(args);
 
-// Add services to the container.
-// Learn more about configuring OpenAPI at https://aka.ms/aspnet/openapi
 builder.Services.AddOpenApi();
+builder.Services.AddCoreServices();
+builder.Services.AddInfrastructureServices(builder.Configuration);
 
 var app = builder.Build();
 
-// Configure the HTTP request pipeline.
 if (app.Environment.IsDevelopment())
 {
     app.MapOpenApi();
@@ -14,28 +19,53 @@ if (app.Environment.IsDevelopment())
 
 app.UseHttpsRedirection();
 
-var summaries = new[]
+app.MapPost("/api/transactions", async (
+    PartnerTransactionRequest request,
+    IValidator<PartnerTransactionRequest> validator,
+    IPartnerVerificationClient verificationClient,
+    ITransactionMessagePublisher messagePublisher,
+    ILogger<Program> logger,
+    CancellationToken cancellationToken) =>
 {
-    "Freezing", "Bracing", "Chilly", "Cool", "Mild", "Warm", "Balmy", "Hot", "Sweltering", "Scorching"
-};
+    try
+    {
+        var validationResult = await validator.ValidateAsync(request, cancellationToken);
+        if (!validationResult.IsValid)
+        {
+            logger.LogWarning("Transaction validation failed for PartnerId: {PartnerId}", request.PartnerId);
+            return Results.BadRequest(new { errors = validationResult.Errors.Select(e => e.ErrorMessage) });
+        }
+        logger.LogInformation("Verifying partner: {PartnerId} for transaction: {TransactionReference}", request.PartnerId, request.TransactionReference);
+        var isPartnerValid = await verificationClient.VerifyPartnerAsync(request.PartnerId, cancellationToken);
+        
+        if (!isPartnerValid)
+        {
+            logger.LogWarning("Partner verification failed for PartnerId: {PartnerId}", request.PartnerId);
+            return Results.BadRequest(new { error = "Partner verification failed" });
+        }
 
-app.MapGet("/weatherforecast", () =>
-{
-    var forecast =  Enumerable.Range(1, 5).Select(index =>
-        new WeatherForecast
-        (
-            DateOnly.FromDateTime(DateTime.Now.AddDays(index)),
-            Random.Shared.Next(-20, 55),
-            summaries[Random.Shared.Next(summaries.Length)]
-        ))
-        .ToArray();
-    return forecast;
+        logger.LogInformation("Publishing transaction: {TransactionReference}", request.TransactionReference);
+        await messagePublisher.PublishTransactionAsync(request, cancellationToken);
+        
+        logger.LogInformation("Transaction processed successfully: {TransactionReference}", request.TransactionReference);
+        return Results.Accepted("", new { transactionReference = request.TransactionReference });
+    }
+    catch (OperationCanceledException ex)
+    {
+        logger.LogWarning(ex, "Operation cancelled for transaction: {TransactionReference}", request.TransactionReference);
+        return Results.StatusCode(StatusCodes.Status408RequestTimeout);
+    }
+    catch (Exception ex)
+    {
+        logger.LogError(ex, "Unexpected error processing transaction: {TransactionReference}", request.TransactionReference);
+        return Results.StatusCode(StatusCodes.Status500InternalServerError);
+    }
 })
-.WithName("GetWeatherForecast");
+.WithName("ProcessTransaction")
+.WithOpenApi()
+.Produces(StatusCodes.Status202Accepted)
+.Produces(StatusCodes.Status400BadRequest)
+.Produces(StatusCodes.Status408RequestTimeout)
+.Produces(StatusCodes.Status500InternalServerError);
 
 app.Run();
-
-record WeatherForecast(DateOnly Date, int TemperatureC, string? Summary)
-{
-    public int TemperatureF => 32 + (int)(TemperatureC / 0.5556);
-}
