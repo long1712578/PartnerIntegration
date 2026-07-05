@@ -1,6 +1,7 @@
-﻿using FluentAssertions;
+using FluentAssertions;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Http.Resilience;
+using Microsoft.Extensions.Logging;
 using Moq;
 using Moq.Protected;
 using PartnerIntegration.BFF.Core.Interfaces;
@@ -8,57 +9,140 @@ using PartnerIntegration.BFF.Infrastructure.HttpClients;
 using Polly;
 using System.Net;
 
-namespace PartnerIntegration.BFF.Tests.VerificationClients
+namespace PartnerIntegration.BFF.Tests.VerificationClients;
+
+public class PartnerVerificationClientTests
 {
-    public class PartnerVerificationClientTests
+    [Fact]
+    public async Task VerifyPartnerAsync_WhenApiFailsTwiceThenSucceeds_ShouldRetryAndReturnTrue()
     {
-        [Fact]
-        public async Task VerifyPartnerAsync_WhenApiFailsTwiceThenSucceeds_ShouldRetryAndReturnTrue()
-        {
-            // Arrange: Mock HttpMessageHandler to mock reponse from api of partner
-            var handlerMock = new Mock<HttpMessageHandler>();
+        var handlerMock = new Mock<HttpMessageHandler>();
 
-            handlerMock.Protected().SetupSequence<Task<HttpResponseMessage>>("SendAsync", ItExpr.IsAny<HttpRequestMessage>(),ItExpr.IsAny<CancellationToken>())
-                .ThrowsAsync(new TimeoutException("Timeout 1 Times"))
-                .ThrowsAsync(new TimeoutException("Timeout 2 Times"))
-                .ReturnsAsync(new HttpResponseMessage(HttpStatusCode.OK));
-
-            var services = new ServiceCollection();
-
-            services.AddHttpClient<IPartnerVerificationClient, PartnerVerificationClient>(client =>
-            {
-                client.BaseAddress = new Uri("http://localhost");
-            })
-            .ConfigurePrimaryHttpMessageHandler(() => handlerMock.Object)
-            .AddResilienceHandler("TestResilience", builder =>
-            {
-                builder.AddRetry(new HttpRetryStrategyOptions
-                {
-                    MaxRetryAttempts = 3,
-                    Delay = TimeSpan.FromMilliseconds(10),
-                    BackoffType = DelayBackoffType.Constant,
-                    ShouldHandle = new PredicateBuilder<HttpResponseMessage>()
-                        .Handle<TimeoutException>()
-                        .Handle<HttpRequestException>()
-                });
-            });
-
-            var serviceProvider = services.BuildServiceProvider();
-            var client = serviceProvider.GetRequiredService<IPartnerVerificationClient>();
-
-            // Act
-            var result = await client.VerifyPartnerAsync("P-1001");
-
-            // Assert
-            result.Should().BeTrue("Because the API 3 times return 200 oke");
-
-            // Verify: the method SendAsync call 3 times (1 times original + 2 times retry)
-            handlerMock.Protected().Verify(
+        handlerMock.Protected()
+            .SetupSequence<Task<HttpResponseMessage>>(
                 "SendAsync",
-                Times.Exactly(3),
                 ItExpr.IsAny<HttpRequestMessage>(),
-                ItExpr.IsAny<CancellationToken>()
-            );
-        }
+                ItExpr.IsAny<CancellationToken>())
+            .ThrowsAsync(new TimeoutException("Timeout 1"))
+            .ThrowsAsync(new TimeoutException("Timeout 2"))
+            .ReturnsAsync(new HttpResponseMessage(HttpStatusCode.OK));
+
+        var services = new ServiceCollection();
+        services.AddLogging();
+
+        services.AddHttpClient<IPartnerVerificationClient, PartnerVerificationClient>(client =>
+        {
+            client.BaseAddress = new Uri("http://localhost");
+        })
+        .ConfigurePrimaryHttpMessageHandler(() => handlerMock.Object)
+        .AddResilienceHandler("TestResilience", builder =>
+        {
+            builder.AddRetry(new HttpRetryStrategyOptions
+            {
+                MaxRetryAttempts = 3,
+                Delay = TimeSpan.FromMilliseconds(10),
+                BackoffType = DelayBackoffType.Constant,
+                ShouldHandle = new PredicateBuilder<HttpResponseMessage>()
+                    .Handle<TimeoutException>()
+                    .Handle<HttpRequestException>()
+            });
+        });
+
+        var serviceProvider = services.BuildServiceProvider();
+        var client = serviceProvider.GetRequiredService<IPartnerVerificationClient>();
+
+        // Act
+        var result = await client.VerifyPartnerAsync("P-1001");
+
+        // Assert
+        result.Should().BeTrue("because the 3rd attempt returned 200 OK");
+
+        handlerMock.Protected().Verify(
+            "SendAsync",
+            Times.Exactly(3),
+            ItExpr.IsAny<HttpRequestMessage>(),
+            ItExpr.IsAny<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task VerifyPartnerAsync_WhenAllRetriesFail_ShouldReturnFalse()
+    {
+        var handlerMock = new Mock<HttpMessageHandler>();
+
+        handlerMock.Protected()
+            .SetupSequence<Task<HttpResponseMessage>>(
+                "SendAsync",
+                ItExpr.IsAny<HttpRequestMessage>(),
+                ItExpr.IsAny<CancellationToken>())
+            .ThrowsAsync(new TimeoutException("Timeout 1"))
+            .ThrowsAsync(new TimeoutException("Timeout 2"))
+            .ThrowsAsync(new TimeoutException("Timeout 3"))
+            .ThrowsAsync(new TimeoutException("Timeout 4"));
+
+        var services = new ServiceCollection();
+        services.AddLogging();
+
+        services.AddHttpClient<IPartnerVerificationClient, PartnerVerificationClient>(client =>
+        {
+            client.BaseAddress = new Uri("http://localhost");
+        })
+        .ConfigurePrimaryHttpMessageHandler(() => handlerMock.Object)
+        .AddResilienceHandler("TestResilience", builder =>
+        {
+            builder.AddRetry(new HttpRetryStrategyOptions
+            {
+                MaxRetryAttempts = 3,
+                Delay = TimeSpan.FromMilliseconds(10),
+                BackoffType = DelayBackoffType.Constant,
+                ShouldHandle = new PredicateBuilder<HttpResponseMessage>()
+                    .Handle<TimeoutException>()
+                    .Handle<HttpRequestException>()
+            });
+        });
+
+        var serviceProvider = services.BuildServiceProvider();
+        var client = serviceProvider.GetRequiredService<IPartnerVerificationClient>();
+
+        var result = await client.VerifyPartnerAsync("P-1001");
+
+        // Assert
+        result.Should().BeFalse("because all retry attempts were exhausted");
+    }
+
+    [Fact]
+    public async Task VerifyPartnerAsync_WhenImmediateSuccess_ShouldReturnTrueWithoutRetry()
+    {
+        var handlerMock = new Mock<HttpMessageHandler>();
+
+        handlerMock.Protected()
+            .Setup<Task<HttpResponseMessage>>(
+                "SendAsync",
+                ItExpr.IsAny<HttpRequestMessage>(),
+                ItExpr.IsAny<CancellationToken>())
+            .ReturnsAsync(new HttpResponseMessage(HttpStatusCode.OK));
+
+        var services = new ServiceCollection();
+        services.AddLogging();
+
+        services.AddHttpClient<IPartnerVerificationClient, PartnerVerificationClient>(client =>
+        {
+            client.BaseAddress = new Uri("http://localhost");
+        })
+        .ConfigurePrimaryHttpMessageHandler(() => handlerMock.Object);
+
+        var serviceProvider = services.BuildServiceProvider();
+        var client = serviceProvider.GetRequiredService<IPartnerVerificationClient>();
+
+        // Act
+        var result = await client.VerifyPartnerAsync("P-1001");
+
+        // Assert
+        result.Should().BeTrue();
+
+        handlerMock.Protected().Verify(
+            "SendAsync",
+            Times.Once(),
+            ItExpr.IsAny<HttpRequestMessage>(),
+            ItExpr.IsAny<CancellationToken>());
     }
 }

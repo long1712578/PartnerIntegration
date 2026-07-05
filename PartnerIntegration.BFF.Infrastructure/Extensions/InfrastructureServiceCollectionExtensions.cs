@@ -1,10 +1,14 @@
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Options;
 using PartnerIntegration.BFF.Core.Interfaces;
+using PartnerIntegration.BFF.Infrastructure.HealthChecks;
 using PartnerIntegration.BFF.Infrastructure.HttpClients;
+using PartnerIntegration.BFF.Infrastructure.Options;
 using PartnerIntegration.BFF.Infrastructure.Publishers;
 using Polly;
 using Microsoft.Extensions.Http.Resilience;
+using RabbitMQ.Client;
 
 namespace PartnerIntegration.BFF.Infrastructure.Extensions;
 
@@ -12,14 +16,27 @@ public static class InfrastructureServiceCollectionExtensions
 {
     public static IServiceCollection AddInfrastructureServices(this IServiceCollection services, IConfiguration configuration)
     {
-        // Add HTTP Client for Partner Verification
+        services.AddOptions<PartnerApiOptions>()
+            .BindConfiguration(PartnerApiOptions.SectionName)
+            .Validate(o => !string.IsNullOrWhiteSpace(o.BaseAddress), "PartnerApi:BaseAddress is required.")
+            .ValidateOnStart();
+
+        services.AddOptions<RabbitMqOptions>()
+            .BindConfiguration(RabbitMqOptions.SectionName)
+            .Validate(o => !string.IsNullOrWhiteSpace(o.Uri), "RabbitMQ:Uri is required.")
+            .Validate(o => !string.IsNullOrWhiteSpace(o.QueueName), "RabbitMQ:QueueName is required.")
+            .ValidateOnStart();
+
+        var partnerApiSection = configuration.GetSection(PartnerApiOptions.SectionName);
+
         services.AddHttpClient<IPartnerVerificationClient, PartnerVerificationClient>()
             .ConfigureHttpClient(client =>
             {
-                var baseAddress = configuration["PartnerApi:BaseAddress"] ?? throw new InvalidOperationException("PartnerApi:BaseAddress is not configured.");
+                var baseAddress = partnerApiSection["BaseAddress"] ?? throw new InvalidOperationException("PartnerApi:BaseAddress is not configured.");
                 client.BaseAddress = new Uri(baseAddress);
 
-                if (int.TryParse(configuration["PartnerApi:TimeoutSeconds"], out var timeout)) client.Timeout = TimeSpan.FromSeconds(timeout);
+                if (int.TryParse(partnerApiSection["TimeoutSeconds"], out var timeout))
+                    client.Timeout = TimeSpan.FromSeconds(timeout);
             })
             .AddResilienceHandler("PartnerApiResilience", builder =>
             {
@@ -33,20 +50,38 @@ public static class InfrastructureServiceCollectionExtensions
                         .Handle<HttpRequestException>()
                         .HandleResult(r => (int)r.StatusCode >= 500)
                 });
+
+                builder.AddCircuitBreaker(new HttpCircuitBreakerStrategyOptions
+                {
+                    SamplingDuration = TimeSpan.FromSeconds(30),
+                    FailureRatio = 0.5,
+                    MinimumThroughput = 5,
+                    BreakDuration = TimeSpan.FromSeconds(15),
+                    ShouldHandle = new PredicateBuilder<HttpResponseMessage>()
+                        .Handle<TimeoutException>()
+                        .Handle<HttpRequestException>()
+                        .HandleResult(r => (int)r.StatusCode >= 500)
+                });
+
                 builder.AddTimeout(TimeSpan.FromSeconds(10));
             });
 
-        // Validate RabbitMQ configuration at startup (fail-fast)
-        var rabbitmqUri = configuration["RabbitMQ:Uri"] ?? throw new InvalidOperationException("RabbitMQ:Uri is not configured.");
-        var queueName = configuration["RabbitMQ:QueueName"] ?? throw new InvalidOperationException("RabbitMQ:QueueName is not configured.");
+        services.AddSingleton<IConnection>(sp =>
+        {
+            var rabbitOptions = sp.GetRequiredService<IOptions<RabbitMqOptions>>().Value;
 
-        if (!Uri.TryCreate(rabbitmqUri, UriKind.Absolute, out var validatedUri))
-            throw new InvalidOperationException($"RabbitMQ:Uri '{rabbitmqUri}' is not a valid URI.");
-        if (string.IsNullOrWhiteSpace(queueName))
-            throw new InvalidOperationException("RabbitMQ:QueueName cannot be empty.");
+            var factory = new ConnectionFactory
+            {
+                Uri = new Uri(rabbitOptions.Uri),
+                AutomaticRecoveryEnabled = true
+            };
 
-        // Register TransactionMessagePublisher
+            return factory.CreateConnectionAsync().GetAwaiter().GetResult();
+        });
+
         services.AddScoped<ITransactionMessagePublisher, TransactionMessagePublisher>();
+
+        services.AddHealthChecks().AddCheck<RabbitMqHealthCheck>("rabbitmq", tags: ["ready"]);
 
         return services;
     }

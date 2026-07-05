@@ -1,23 +1,35 @@
-using PartnerIntegration.BFF.Api.Extensions;
+using Microsoft.AspNetCore.Authentication;
+using PartnerIntegration.BFF.Api.Authentication;
 using PartnerIntegration.BFF.Api.Filters;
+using PartnerIntegration.BFF.Api.Middlewares;
 using PartnerIntegration.BFF.Core.Extensions;
-using PartnerIntegration.BFF.Core.Interfaces;
-using PartnerIntegration.BFF.Core.Models;
 using PartnerIntegration.BFF.Infrastructure.Extensions;
 
 var builder = WebApplication.CreateBuilder(args);
 
-builder.Services.AddOpenApi();
+builder.Services.AddControllers(options =>
+{
+    options.Filters.Add<ValidationActionFilter>();
+});
+builder.Services.AddEndpointsApiExplorer();
+builder.Services.AddSwaggerGen();
+
 builder.Services.AddCoreServices();
 builder.Services.AddInfrastructureServices(builder.Configuration);
 
+builder.Services.AddExceptionHandler<GlobalExceptionHandler>();
+builder.Services.AddProblemDetails();
+builder.Services.AddAuthentication("ApiKey").AddScheme<AuthenticationSchemeOptions, ApiKeyAuthenticationHandler>("ApiKey", null);
+builder.Services.AddAuthorization();
+
 var app = builder.Build();
 
-app.UseGlobalExceptionHandler();
+app.UseExceptionHandler();
 
 if (app.Environment.IsDevelopment())
 {
-    app.MapOpenApi();
+    app.UseSwagger();
+    app.UseSwaggerUI();
 }
 
 if (!app.Environment.IsDevelopment())
@@ -25,34 +37,12 @@ if (!app.Environment.IsDevelopment())
     app.UseHttpsRedirection();
 }
 
-app.MapPost("/api/v1/partner/transactions", async (
-    PartnerTransactionRequest request,
-    IPartnerVerificationClient partnerClient,
-    ITransactionMessagePublisher messagePublisher,
-    CancellationToken cancellationToken) =>
-{
-    var isPartnerValid = await partnerClient.VerifyPartnerAsync(request.PartnerId, cancellationToken);
+app.UseAuthentication();
+app.UseAuthorization();
 
-    if (!isPartnerValid)
-    {
-        return Results.Problem(statusCode: 403, title: "Partner Verification Failed",
-            detail: "The provided PartnerId is invalid or inactive.");
-    }
-
-    await messagePublisher.PublishTransactionAsync(request, cancellationToken);
-
-    return Results.Accepted(value: new { Message = "Transaction accepted and queued for processing." });
-})
-.AddEndpointFilter<ValidationFilter<PartnerTransactionRequest>>();
-
-
-// Mock "Partner Verification API" — simulates 30% timeout / 70% success per requirements
-app.MapGet("/internal/mock-partner/{id}", (string id) =>
-{
-    if (Random.Shared.Next(1, 101) <= 30)
-        throw new TimeoutException("Simulated partner API timeout.");
-
-    return Results.Ok(new { PartnerId = id, Status = "Active" });
-});
+app.MapControllers();
+app.MapHealthChecks("/health").AllowAnonymous();
 
 app.Run();
+
+public partial class Program { }

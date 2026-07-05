@@ -1,6 +1,46 @@
-@PartnerIntegration.BFF.Api_HostAddress = http://localhost:5071
+@host = http://localhost:5071
+@apiKey = partner-api-key-2026
 
-GET {{PartnerIntegration.BFF.Api_HostAddress}}/weatherforecast/
-Accept: application/json
+### Create Partner Transaction (valid payload)
+POST {{host}}/api/v1/partner/transactions
+Content-Type: application/json
+X-Api-Key: {{apiKey}}
 
-###
+{
+  "partnerId": "P-1001",
+  "transactionReference": "TXN-99823",
+  "amount": 250.00,
+  "currency": "USD",
+  "timestamp": "2024-05-10T14:30:00Z"
+}
+
+### Create Partner Transaction (invalid — missing fields)
+POST {{host}}/api/v1/partner/transactions
+Content-Type: application/json
+X-Api-Key: {{apiKey}}
+
+{
+  "partnerId": "",
+  "transactionReference": "",
+  "amount": -10,
+  "currency": "XYZ",
+  "timestamp": "2024-05-10T14:30:00Z"
+}
+
+### Create Partner Transaction (no API key — should return 401)
+POST {{host}}/api/v1/partner/transactions
+Content-Type: application/json
+
+{
+  "partnerId": "P-1001",
+  "transactionReference": "TXN-99823",
+  "amount": 250.00,
+  "currency": "USD",
+  "timestamp": "2024-05-10T14:30:00Z"
+}
+
+### Mock Partner Verification (internal, no auth required)
+GET {{host}}/internal/mock-partner/P-1001
+
+### Health Check
+GET {{host}}/health

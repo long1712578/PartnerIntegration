@@ -1,4 +1,3 @@
-using FluentValidation;
 using PartnerIntegration.BFF.Core.Models;
 using PartnerIntegration.BFF.Core.Validators;
 
@@ -110,5 +109,62 @@ public class PartnerTransactionRequestValidatorTests
 
         // Assert
         Assert.True(result.IsValid);
+    }
+
+    [Fact]
+    public async Task Validate_WithEmptyTransactionReference_ShouldReturnError()
+    {
+        // Arrange
+        var request = new PartnerTransactionRequest(
+            PartnerId: "P-1001",
+            TransactionReference: "",
+            Amount: 100.50m,
+            Currency: "USD",
+            Timestamp: DateTimeOffset.UtcNow);
+
+        // Act
+        var result = await _validator.ValidateAsync(request);
+
+        // Assert
+        Assert.False(result.IsValid);
+        Assert.Contains(result.Errors, e => e.PropertyName == "TransactionReference");
+    }
+
+    [Fact]
+    public async Task Validate_WithEmptyCurrency_ShouldReturnError()
+    {
+        // Arrange
+        var request = new PartnerTransactionRequest(
+            PartnerId: "P-1001",
+            TransactionReference: "TXN-001",
+            Amount: 100.50m,
+            Currency: "",
+            Timestamp: DateTimeOffset.UtcNow);
+
+        // Act
+        var result = await _validator.ValidateAsync(request);
+
+        // Assert
+        Assert.False(result.IsValid);
+        Assert.Contains(result.Errors, e => e.PropertyName == "Currency");
+    }
+
+    [Fact]
+    public async Task Validate_WithMultipleErrors_ShouldReturnAllErrors()
+    {
+        // Arrange
+        var request = new PartnerTransactionRequest(
+            PartnerId: "",
+            TransactionReference: "",
+            Amount: -1,
+            Currency: "INVALID",
+            Timestamp: DateTimeOffset.UtcNow);
+
+        // Act
+        var result = await _validator.ValidateAsync(request);
+
+        // Assert
+        Assert.False(result.IsValid);
+        Assert.True(result.Errors.Count >= 4, "Should have errors for PartnerId, TransactionReference, Amount, and Currency");
     }
 }

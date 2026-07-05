@@ -6,6 +6,7 @@ services:
       - ASPNETCORE_HTTPS_PORTS=8081
       - RabbitMQ__Uri=amqp://guest:guest@rabbitmq:5672/
       - PartnerApi__BaseAddress=http://localhost:8080
+      - Authentication__ApiKey=partner-api-key-2026
     ports:
       - "8090:8080"
       - "8091:8081"
