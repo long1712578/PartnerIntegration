@@ -2,10 +2,6 @@ using System.Net;
 
 namespace PartnerIntegration.BFF.Core.Exceptions;
 
-/// <summary>
-/// Base exception for all application-level domain errors.
-/// Maps to a specific HTTP status code and optional machine-readable error code.
-/// </summary>
 public class AppException : Exception
 {
     public HttpStatusCode StatusCode { get; }
