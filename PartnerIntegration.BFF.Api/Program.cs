@@ -1,4 +1,4 @@
-using Microsoft.AspNetCore.Mvc;
+using PartnerIntegration.BFF.Api.Extensions;
 using PartnerIntegration.BFF.Api.Filters;
 using PartnerIntegration.BFF.Core.Extensions;
 using PartnerIntegration.BFF.Core.Interfaces;
@@ -13,6 +13,8 @@ builder.Services.AddInfrastructureServices(builder.Configuration);
 
 var app = builder.Build();
 
+app.UseGlobalExceptionHandler();
+
 if (app.Environment.IsDevelopment())
 {
     app.MapOpenApi();
@@ -23,37 +25,33 @@ if (!app.Environment.IsDevelopment())
     app.UseHttpsRedirection();
 }
 
-app.MapPost("/api/v1/partner/transactions", async ([FromBody] PartnerTransactionRequest request, [FromServices] IPartnerVerificationClient partnerClient,
-                                                   [FromServices] ITransactionMessagePublisher messagePublisher, CancellationToken cancellationToken) =>
+app.MapPost("/api/v1/partner/transactions", async (
+    PartnerTransactionRequest request,
+    IPartnerVerificationClient partnerClient,
+    ITransactionMessagePublisher messagePublisher,
+    CancellationToken cancellationToken) =>
 {
-    // Verify Partner via External API
     var isPartnerValid = await partnerClient.VerifyPartnerAsync(request.PartnerId, cancellationToken);
 
     if (!isPartnerValid)
     {
-        return Results.Problem(statusCode: 403, title: "Partner Verification Failed", detail: "The provided PartnerId is invalid or inactive.");
+        return Results.Problem(statusCode: 403, title: "Partner Verification Failed",
+            detail: "The provided PartnerId is invalid or inactive.");
     }
 
-    // Push into Queue
     await messagePublisher.PublishTransactionAsync(request, cancellationToken);
 
     return Results.Accepted(value: new { Message = "Transaction accepted and queued for processing." });
 })
-.AddEndpointFilter<ValidationFilter<PartnerTransactionRequest>>(); // Add Validation Filter into endpoint
+.AddEndpointFilter<ValidationFilter<PartnerTransactionRequest>>();
 
 
-// Mock "Partner Verification API" internal
+// Mock "Partner Verification API" — simulates 30% timeout / 70% success per requirements
 app.MapGet("/internal/mock-partner/{id}", (string id) =>
 {
-    // Random error 30% to test Retry logic
-    var randomValue = Random.Shared.Next(1, 101);
-
-    if (randomValue <= 30)
-    {
+    if (Random.Shared.Next(1, 101) <= 30)
         throw new TimeoutException("Simulated partner API timeout.");
-    }
 
-    // 70% success
     return Results.Ok(new { PartnerId = id, Status = "Active" });
 });
 

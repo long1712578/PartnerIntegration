@@ -16,11 +16,10 @@ public static class InfrastructureServiceCollectionExtensions
         services.AddHttpClient<IPartnerVerificationClient, PartnerVerificationClient>()
             .ConfigureHttpClient(client =>
             {
-                var baseAddress = configuration["PartnerApi:BaseAddress"]
-                    ?? throw new InvalidOperationException("PartnerApi:BaseAddress is not configured.");
+                var baseAddress = configuration["PartnerApi:BaseAddress"] ?? throw new InvalidOperationException("PartnerApi:BaseAddress is not configured.");
                 client.BaseAddress = new Uri(baseAddress);
-                if (int.TryParse(configuration["PartnerApi:TimeoutSeconds"], out var timeout))
-                    client.Timeout = TimeSpan.FromSeconds(timeout);
+
+                if (int.TryParse(configuration["PartnerApi:TimeoutSeconds"], out var timeout)) client.Timeout = TimeSpan.FromSeconds(timeout);
             })
             .AddResilienceHandler("PartnerApiResilience", builder =>
             {
@@ -28,16 +27,18 @@ public static class InfrastructureServiceCollectionExtensions
                 {
                     MaxRetryAttempts = 3,
                     Delay = TimeSpan.FromSeconds(2),
-                    BackoffType = DelayBackoffType.Exponential
+                    BackoffType = DelayBackoffType.Exponential,
+                    ShouldHandle = new PredicateBuilder<HttpResponseMessage>()
+                        .Handle<TimeoutException>()
+                        .Handle<HttpRequestException>()
+                        .HandleResult(r => (int)r.StatusCode >= 500)
                 });
                 builder.AddTimeout(TimeSpan.FromSeconds(10));
             });
 
-        //Add MassTransit for RabbitMQ
-        var rabbitmqUri = configuration["RabbitMQ:Uri"]
-            ?? throw new InvalidOperationException("RabbitMQ:Uri is not configured.");
-        var queueName = configuration["RabbitMQ:QueueName"]
-            ?? throw new InvalidOperationException("RabbitMQ:QueueName is not configured.");
+        // Validate RabbitMQ configuration at startup (fail-fast)
+        var rabbitmqUri = configuration["RabbitMQ:Uri"] ?? throw new InvalidOperationException("RabbitMQ:Uri is not configured.");
+        var queueName = configuration["RabbitMQ:QueueName"] ?? throw new InvalidOperationException("RabbitMQ:QueueName is not configured.");
 
         if (!Uri.TryCreate(rabbitmqUri, UriKind.Absolute, out var validatedUri))
             throw new InvalidOperationException($"RabbitMQ:Uri '{rabbitmqUri}' is not a valid URI.");

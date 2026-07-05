@@ -36,7 +36,10 @@ namespace PartnerIntegration.BFF.Tests.VerificationClients
                 {
                     MaxRetryAttempts = 3,
                     Delay = TimeSpan.FromMilliseconds(10),
-                    BackoffType = DelayBackoffType.Constant
+                    BackoffType = DelayBackoffType.Constant,
+                    ShouldHandle = new PredicateBuilder<HttpResponseMessage>()
+                        .Handle<TimeoutException>()
+                        .Handle<HttpRequestException>()
                 });
             });
 
