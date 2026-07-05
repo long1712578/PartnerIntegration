@@ -380,8 +380,3 @@ PartnerIntegration/
 └── README.md
 ```
 
----
-
-## 📄 License
-
-Built as a technical assessment. All code is original.
